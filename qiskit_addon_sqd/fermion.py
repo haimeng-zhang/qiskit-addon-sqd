@@ -167,6 +167,7 @@ def diagonalize_fermionic_hamiltonian(
     max_dim: int | tuple[int, int] | None = None,
     include_configurations: list[int] | tuple[list[int], list[int]] | np.ndarray | None = None,
     initial_occupancies: tuple[np.ndarray, np.ndarray] | None = None,
+    initial_scistate: SCIState | None = None,
     carryover_threshold: float = 1e-4,
     callback: Callable[[list[SCIResult]], None] | None = None,
     seed: int | np.random.Generator | None = None,
@@ -292,9 +293,11 @@ def diagonalize_fermionic_hamiltonian(
 
     include_a = np.unique(include_a)
     include_b = np.unique(include_b)
-    carryover_strings_a = np.array([], dtype=np.int64)
-    carryover_strings_b = np.array([], dtype=np.int64)
-
+    if initial_scistate is None:
+        carryover_strings_a = np.array([], dtype=np.int64)
+        carryover_strings_b = np.array([], dtype=np.int64)
+    else:
+        carryover_strings_a, carryover_strings_b = _get_carryover_strings(initial_scistate, carryover_threshold, symmetrize_spin)
     # Convert BitArray into bitstring and probability arrays
     raw_bitstrings, raw_probs = bit_array_to_arrays(bit_array)
 
@@ -397,32 +400,42 @@ def diagonalize_fermionic_hamiltonian(
 
         # Carry over bitstrings with large CI weight
         sci_state = current_result.sci_state
-        flattened = sci_state.amplitudes.reshape(-1)
-        absolute_vals = np.abs(flattened)
-        indices = np.argsort(absolute_vals)
-        carryover_index = np.searchsorted(absolute_vals, carryover_threshold, sorter=indices)
-        carryover_indices = indices[carryover_index:]
-        _, n_strings_b = sci_state.amplitudes.shape
-        alpha_indices, beta_indices = np.divmod(carryover_indices, n_strings_b)
-        alpha_indices = np.unique(alpha_indices)
-        beta_indices = np.unique(beta_indices)
-        carryover_strings_a = sci_state.ci_strs_a[alpha_indices]
-        carryover_strings_b = sci_state.ci_strs_b[beta_indices]
-        # Sort carryover strings in descending order by marginal weight
-        weights_a = np.sum(np.abs(sci_state.amplitudes[alpha_indices]) ** 2, axis=1)
-        weights_b = np.sum(np.abs(sci_state.amplitudes[:, beta_indices]) ** 2, axis=0)
-        if symmetrize_spin:
-            carryover_strings = np.concatenate((carryover_strings_a, carryover_strings_b))
-            weights = np.concatenate((weights_a, weights_b))
-            carryover_strings = carryover_strings[np.argsort(weights)[::-1]]
-            carryover_strings = _unique_with_order_preserved(carryover_strings)
-            carryover_strings_a = carryover_strings_b = carryover_strings
-        else:
-            carryover_strings_a = carryover_strings_a[np.argsort(weights_a)[::-1]]
-            carryover_strings_b = carryover_strings_b[np.argsort(weights_b)[::-1]]
-
+        carryover_strings_a, carryover_strings_b = _get_carryover_strings(
+            sci_state, carryover_threshold, symmetrize_spin
+            )
     # best_result is not None because there must have been at least one iteration
     return cast(SCIResult, best_result)
+
+
+def _get_carryover_strings(
+    sci_state: SCIState,
+    carryover_threshold: float,
+    symmetrize_spin: bool,
+) -> tuple[np.ndarray, np.ndarray]:
+    flattened = sci_state.amplitudes.reshape(-1)
+    absolute_vals = np.abs(flattened)
+    indices = np.argsort(absolute_vals)
+    carryover_index = np.searchsorted(absolute_vals, carryover_threshold, sorter=indices)
+    carryover_indices = indices[carryover_index:]
+    _, n_strings_b = sci_state.amplitudes.shape
+    alpha_indices, beta_indices = np.divmod(carryover_indices, n_strings_b)
+    alpha_indices = np.unique(alpha_indices)
+    beta_indices = np.unique(beta_indices)
+    carryover_strings_a = sci_state.ci_strs_a[alpha_indices]
+    carryover_strings_b = sci_state.ci_strs_b[beta_indices]
+    # Sort carryover strings in descending order by marginal weight
+    weights_a = np.sum(np.abs(sci_state.amplitudes[alpha_indices]) ** 2, axis=1)
+    weights_b = np.sum(np.abs(sci_state.amplitudes[:, beta_indices]) ** 2, axis=0)
+    if symmetrize_spin:
+        carryover_strings = np.concatenate((carryover_strings_a, carryover_strings_b))
+        weights = np.concatenate((weights_a, weights_b))
+        carryover_strings = carryover_strings[np.argsort(weights)[::-1]]
+        carryover_strings = _unique_with_order_preserved(carryover_strings)
+        carryover_strings_a = carryover_strings_b = carryover_strings
+    else:
+        carryover_strings_a = carryover_strings_a[np.argsort(weights_a)[::-1]]
+        carryover_strings_b = carryover_strings_b[np.argsort(weights_b)[::-1]]
+    return carryover_strings_a, carryover_strings_b
 
 
 def _unique_with_order_preserved(vals: np.ndarray) -> np.ndarray:
