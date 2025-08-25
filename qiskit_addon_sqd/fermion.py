@@ -285,7 +285,10 @@ def diagonalize_fermionic_hamiltonian(
         include_b = include_configurations
 
     rng = np.random.default_rng(seed)
-    current_occupancies = initial_occupancies
+    if initial_scistate is None:
+        current_occupancies = initial_occupancies
+    else:
+        current_occupancies = initial_scistate.orbital_occupancies()
     best_result = None
     current_result = None
     if sci_solver is None:
